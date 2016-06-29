@@ -1,0 +1,268 @@
+%% trajectiories with smooth of x, y and then compute velocity
+l=length(P_tracks_all);
+vec_len=[];
+fps=100;
+S=30;
+K=26;
+total_numer_tumble=0;
+time_spent_tumbling=0;
+time_spent_running=0;
+V_save=0;
+
+ for h=1:l
+
+     if length(P_tracks_all(h).X) >500 %only trajectories that lasts more than 5 s
+       
+     VV=sqrt(P_tracks_all(h).VelX.^2+P_tracks_all(h).VelY.^2)*fps;
+     if mean(VV)>10 %same condition used for MSD
+ clear vx
+ clear vy
+ clear teta
+ clear Van
+ clear vxx
+ clear vyy
+ clear deltaangy
+ clear deltaangx
+ clear deltaangyy
+ clear deltaangxx
+ clear V
+ clear deltateta
+xsm=smooth(P_tracks_all(h).X,30);  %smooth the x y used to compute absolute velocity V
+ysm=smooth(P_tracks_all(h).Y,30);
+xsma=smooth(P_tracks_all(h).X,23); %smooth the x y used to compute angular velocity Van
+ysma=smooth(P_tracks_all(h).Y,23);
+
+for j=11:length(xsm)              %I don't consider the dirst points that have generally really low velocity
+    
+   vx(j)=(xsm(j-1)-xsm(j-2))./0.01; %compute x velocity, it is delated to be matched with angular velocity
+     vy(j)=(ysm(j-1)-ysm(j-2))./0.01;
+    deltaangx=xsma(j)-xsma(j-3);  %compute deltax and deltay used for angular velocity. It works better if deltax deltay are computed on few point compared to 1 point
+     deltangy=(ysma(j)-ysma(j-3));
+
+     Van(j)=atand((deltangy)./(deltaangx)); % angular velocity for each time step
+
+end
+ vyy=smooth(vy,10); %second smooth on absolute velocities vx vy
+   vxx=smooth(vx,10);
+ V=sqrt((vxx).^2 + (vyy).^2); %absolute velocity
+ 
+ 
+if mean(V)>3  %exclude trajectories with mean absolute velocity lower than 3 (noise, bacteria without flagella..)
+
+%compute angular variation
+  [Pmaxan,locmaxan,w,p]=findpeaks(Van); % find local maxima 
+ [Pminan,locminan,w,p]=findpeaks(-Van); % find local minima 
+  beta=2;
+  clear tuman;
+
+  tuman=[];
+ 
+  D=0.1;
+  
+  for i=2: length(locmaxan)-1
+%   
+%   for i=15
+%for each local maximum find the two closest local minima t1 t2 to find the
+%time deltat between the two local minima deltat=[t2-t1]
+      maxi=locmaxan(i); 
+      f=locminan(locminan<maxi);
+      t1=f(end);
+      
+      f2=locminan(locminan>maxi);
+      t2=f2(1);
+      
+rate=0;
+%compute the delta angular velocity variation in the deltat time
+    for j=t1+1:t2
+        rate=rate+abs(Van(j)-Van(j-1)); 
+    end
+
+      limit=beta*(sqrt(2*D*(t2-t1)*0.01)); %not used
+   
+%      
+      if rate>=33.5 %check if the chenge in agular velocity is bigger than the one for rotational diffusion
+          
+          %the tumble time is the one between t1 and t2 where vel is higher
+          %than a soglia
+        for j=t1:t2
+             vel=abs(Van(maxi)-Van(j));
+             soglia=0.66*abs(Van(maxi));
+             
+             if vel<=soglia
+         tuman=[tuman; j]; %collect all the tumble timesteps based on angular velocity criteria
+             end
+         end
+      end
+    end
+    
+tumbling2=zeros((length(Van)),1);
+  ff=0;
+  %create a vector where each time step is equal to 1 if it is in tumbling based on angular velocity,
+  %0 if not
+for i=11:length(Van)
+    
+  ff=tuman(tuman==i);
+  
+  if ff~=0
+      
+      tumbling2(i)=1;
+  end
+  ff=0;
+end    
+
+%same for absolute velocity
+ [Pmax,locmax,w,p]=findpeaks(V); % maxima 
+ [Pmin,locmin,w,p]=findpeaks(-V); % minima 
+
+  alpha=0.21;
+  clear tum;
+  tum=[];
+  for i=1: length(locmin)-1
+  
+   
+      mini=locmin(i);
+      f=locmax(locmax<mini);
+      t1=f(end);
+      
+      f2=locmax(locmax>mini);
+      t2=f2(1);
+%       
+     deltav=max( (V(t1)- V(mini)),(V(t2)- V(mini)));
+     rate=deltav./(V(mini));
+     
+     
+     if rate>=alpha
+         for j=t1:t2
+             vel=V(j);
+             soglia=V(mini)+0.18*deltav;
+             
+             if vel<=soglia
+         tum=[tum; j];
+             end
+         end
+     
+    end
+  end
+  tumbling=zeros((length(V)),1);
+  ff=0;
+for i=11:length(V)
+    
+  ff=tum(tum==i);
+  
+  if ff~=0
+      
+      tumbling(i)=1;
+  end
+  ff=0;
+end
+%now create a vector that consider tumble only if both angular and absolute
+%velocity say tumble
+tumbletotal=zeros(length(V),1);
+for i=11:length(V)
+    
+    if tumbling(i)==1
+    if tumbling2(i)==1
+        
+    if i>4 &&i<length(V)-5
+      tumbletotal(i-5:i+5)=1; %extend the tumble for 0.1 s (otherwise tumble is not well defined, could be irregular points)
+    end
+  end
+      end
+ 
+end
+
+ff=find(tumbletotal);
+ tt=length(ff); %tumble time
+ tt1=length(V) %total  time
+ 
+ if tt/tt1<0.4 %criteria to exclude particles that are tumbling for mre than 40% of the time( noise, bacteria without flagella..)
+     
+     
+%      [pp,ll]=findpeack(tumbletotal);
+% % if pp>2
+% xsm_final=xsm(ll(1):ll(end));
+% ysm_final=ysm(ll(1):ll(end));
+
+%find number of tumbling
+P_t=findpeaks(tumbletotal);
+n_tumbles=length(P_t) %number of tumble events of this particles
+total_numer_tumble=total_numer_tumble+n_tumbles; %total tumble events collection
+ff_tt=find(tumbletotal); 
+
+time_spent_tumbling=(time_spent_tumbling+ length(ff_tt)); %total time spent tumbling by all particles
+
+
+running=length(xsm)-11-length(ff_tt); %running time for this particle as total time minus time spent tumbling
+if running>0  
+time_spent_running=time_spent_running+running; %collection of the time spent running by all particles
+end
+ % compute velocity 
+ for i=1:length(V)
+    
+    if tumbling(i)==1
+    if tumbling2(i)==1
+        %if it is tumbling the tumble time is extended of 0.2 s left and
+        %right as in vergassola paper
+    if i>20 && i<length(V)-20
+      tumbletotal_v(i-20:i+20)=1; 
+      VVV(i-20:i+20)=100000; % if it is tumbling the vector that collect velocities VVV has velue 10000 that means tumble
+      
+      
+    end
+   
+
+        
+    end
+    else
+     
+        VVV(i)=V(i); %if it is not tumbling the velocity is the absolute velocity
+    end
+      
+ 
+ end
+ VVV=VVV(11:end); %to compute velocity I remove the fist 11 values that are generally with low velocity because of tracking algoritm
+ VVV1=VVV(VVV~=100000); % remove the tumbling events
+ V_save=[V_save, VVV1]; %vector that collect all the velocities from all the particles
+
+ 
+    %visualise trajectories and tumbles
+l=length(P_tracks_all);
+vec_len=[];
+fps=100;
+S=35;
+
+% 
+% % % % 
+%    figure(gcf);scatter(xsm(11:end),ysm(11:end),S,V(11:end),'filled')
+% %I visualize only the part of used to compute velocity
+for j=11: length(V)
+    hold on
+    if tumbletotal(j)==1
+       scatter(xsm(j),ysm(j),S,'r','filled')
+    end
+
+end
+%      h    
+%      pause
+%         close all
+
+  end
+ end
+     end
+     end
+ end
+
+   
+    
+%% run time
+
+run_time=0.01*time_spent_running./total_numer_tumble %run time as vergassola paper
+tumble_time=0.01*time_spent_tumbling./total_numer_tumble
+
+V=mean(V_save) %mean velocity
+variance=var(V_save) %variance
+sd=sqrt(variance) %standard deviation
+ 
+    
+
+
